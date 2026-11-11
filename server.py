@@ -3,7 +3,7 @@ import csv
 import json
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 
 # ============================================
@@ -14,6 +14,12 @@ mcp = FastMCP("Komugino Bakery Research")
 
 BASE_DIR = Path(__file__).resolve().parent
 CSV_PATH = BASE_DIR / "bakery.csv"
+
+BASIC_COLUMNS = [
+    "店舗名",
+    "開業日",
+    "住所",
+]
 
 ATTRIBUTE_COLUMNS = [
     "ドイツパン販売",
@@ -29,12 +35,6 @@ ATTRIBUTE_COLUMNS = [
     "予約・取り置き対応",
 ]
 
-BASIC_COLUMNS = [
-    "店舗名",
-    "開業日",
-    "住所",
-]
-
 REQUIRED_COLUMNS = BASIC_COLUMNS + ATTRIBUTE_COLUMNS
 
 MISSING_VALUES = {"", "－", "-", "—"}
@@ -48,8 +48,8 @@ def load_bakeries():
     """
     bakery.csvから店舗情報を読み込む。
 
-    CSVに記載された説明文をそのまま保持する。
-    未記載項目は「－」として保持する。
+    登録されている説明文は変更しない。
+    「－」は未記載情報として保持する。
     """
 
     if not CSV_PATH.exists():
@@ -68,7 +68,9 @@ def load_bakeries():
         reader = csv.DictReader(file)
 
         if reader.fieldnames is None:
-            raise ValueError("CSVのヘッダーがありません。")
+            raise ValueError(
+                "CSVのヘッダーがありません。"
+            )
 
         missing_columns = [
             column
@@ -82,13 +84,16 @@ def load_bakeries():
             )
 
         for row in reader:
+
             if not row.get("店舗名"):
                 continue
 
             bakery = {}
 
             for column in REQUIRED_COLUMNS:
+
                 value = row.get(column, "")
+
                 bakery[column] = (
                     value.strip()
                     if isinstance(value, str)
@@ -101,15 +106,17 @@ def load_bakeries():
 
 
 # ============================================
-# 表示用データ作成
+# 店舗情報の整形
 # ============================================
 
 def format_bakery(bakery):
     """
     店舗情報を整理する。
 
-    「－」は未記載情報として分類する。
-    非対応という意味には変換しない。
+    登録されている説明文と
+    説明文が未記載の属性を区別する。
+
+    未記載は非対応を意味しない。
     """
 
     registered_attributes = {}
@@ -121,6 +128,7 @@ def format_bakery(bakery):
 
         if value in MISSING_VALUES:
             unregistered_attributes.append(column)
+
         else:
             registered_attributes[column] = value
 
@@ -134,6 +142,10 @@ def format_bakery(bakery):
 
 
 def to_json(data):
+    """
+    日本語を維持してJSON文字列に変換する。
+    """
+
     return json.dumps(
         data,
         ensure_ascii=False,
@@ -142,14 +154,15 @@ def to_json(data):
 
 
 # ============================================
-# ツール1：全店舗一覧
+# ツール1：店舗一覧
 # ============================================
 
 @mcp.tool()
 def list_bakeries() -> str:
     """
-    架空のこむぎ県こむぎ野区に登録されている
-    全ベーカリーの店舗名、開業日、住所を取得する。
+    架空地域「こむぎ県こむぎ野区」に
+    登録された全ベーカリーの
+    店舗名、開業日、住所を取得する。
     """
 
     bakeries = load_bakeries()
@@ -176,8 +189,8 @@ def list_bakeries() -> str:
 @mcp.tool()
 def get_bakery(name: str) -> str:
     """
-    指定された店舗名と完全一致するベーカリーの
-    登録情報を取得する。
+    指定された店舗名と完全一致する
+    ベーカリーの登録情報を取得する。
 
     Args:
         name: 店舗名（例：ベーカリー1）
@@ -186,8 +199,12 @@ def get_bakery(name: str) -> str:
     bakeries = load_bakeries()
 
     for bakery in bakeries:
+
         if bakery["店舗名"] == name:
-            return to_json(format_bakery(bakery))
+
+            return to_json(
+                format_bakery(bakery)
+            )
 
     return to_json({
         "検索店舗名": name,
@@ -205,7 +222,8 @@ def search_bakeries(keyword: str) -> str:
     店舗名、住所、登録済み属性の説明文から
     指定キーワードを検索する。
 
-    未記載属性は肯定的な検索一致として扱わない。
+    単純な部分文字列一致を使用する。
+    説明文が未記載の属性は検索対象に含めない。
 
     Args:
         keyword: 検索キーワード
@@ -216,6 +234,7 @@ def search_bakeries(keyword: str) -> str:
     keyword = keyword.strip().casefold()
 
     if not keyword:
+
         return to_json({
             "結果": "検索キーワードを指定してください。"
         })
@@ -230,6 +249,7 @@ def search_bakeries(keyword: str) -> str:
         ]
 
         for column in ATTRIBUTE_COLUMNS:
+
             value = bakery.get(column, "")
 
             if value not in MISSING_VALUES:
@@ -240,7 +260,10 @@ def search_bakeries(keyword: str) -> str:
         ).casefold()
 
         if keyword in searchable_text:
-            results.append(format_bakery(bakery))
+
+            results.append(
+                format_bakery(bakery)
+            )
 
     return to_json({
         "検索キーワード": keyword,
@@ -250,16 +273,16 @@ def search_bakeries(keyword: str) -> str:
 
 
 # ============================================
-# ツール4：全店舗の詳細情報取得
+# ツール4：全店舗の詳細情報
 # ============================================
 
 @mcp.tool()
 def get_all_bakeries() -> str:
     """
-    全30店舗について、CSVに登録された
-    すべての属性情報を取得する。
+    全30店舗の詳細情報を取得する。
 
-    説明文はCSVに登録された内容をそのまま使用する。
+    CSVに登録された説明文をそのまま提供する。
+    未記載の属性は未記載として扱う。
     """
 
     bakeries = load_bakeries()
@@ -276,7 +299,7 @@ def get_all_bakeries() -> str:
 
 
 # ============================================
-# MCPサーバー起動
+# サーバー起動
 # ============================================
 
 if __name__ == "__main__":
